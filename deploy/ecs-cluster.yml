@@ -1,0 +1,169 @@
+---
+
+AWSTemplateFormatVersion: "2010-09-09"
+
+
+Description: >
+  An ECS Cluster with Blox.
+
+Parameters:
+
+  AvailabilityZone1:
+    Type: AWS::EC2::AvailabilityZone::Name
+
+  AvailabilityZone2:
+    Type: AWS::EC2::AvailabilityZone::Name
+
+  AvailabilityZone3:
+    Type: AWS::EC2::AvailabilityZone::Name
+
+  KeyName:
+    Description: The name of the key pair used to SSH into the box, pass an empty string for no SSH access.
+    Type: String
+
+Conditions:
+  HasKeyName: !Not [ !Equals [ "", !Ref KeyName ] ]
+  HasThreeAvailabilityZones: !Not [ !Equals [ "eu-central-1", !Ref "AWS::Region" ] ]
+
+Resources:
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        -
+          Key: Name
+          Value: !Ref AWS::StackName
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  SubnetClusterZone1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Ref AvailabilityZone1
+      CidrBlock: 10.0.10.0/26
+      VpcId: !Ref VPC
+
+  SubnetClusterZone2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Ref AvailabilityZone2
+      CidrBlock: 10.0.10.64/26
+      VpcId: !Ref VPC
+
+  SubnetClusterZone3:
+    Type: AWS::EC2::Subnet
+    Condition: HasThreeAvailabilityZones
+    Properties:
+      AvailabilityZone: !Ref AvailabilityZone3
+      CidrBlock: 10.0.10.128/26
+      VpcId: !Ref VPC
+
+  RouteTableCluster:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  RouteClusterInternetGateway:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref RouteTableCluster
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetRouteTableAssociationClusterZone1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetClusterZone1
+      RouteTableId: !Ref RouteTableCluster
+
+  SubnetRouteTableAssociationClusterZone2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetClusterZone2
+      RouteTableId: !Ref RouteTableCluster
+
+  SubnetRouteTableAssociationClusterZone3:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: HasThreeAvailabilityZones
+    Properties:
+      SubnetId: !Ref SubnetClusterZone3
+      RouteTableId: !Ref RouteTableCluster
+
+  SecurityGroupCluster:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SecurityGroupCluster
+      VpcId: !Ref VPC
+
+  SecurityGroupIngressCluster:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref SecurityGroupCluster
+      SourceSecurityGroupId: !Ref SecurityGroupCluster
+      FromPort: "-1"
+      ToPort: "-1"
+      IpProtocol: "-1"
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+
+  RoleCluster:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "ec2.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+
+  InstanceProfileCluster:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+        - !Ref RoleCluster
+
+  LaunchConfigurationCluster:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    DependsOn: Cluster
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /etc/ecs/ecs.config:
+              content: |
+                ECS_CLUSTER={{cluster_name}}
+              context:
+                cluster_name: !Ref Cluster
+    Properties:
+      AssociatePublicIpAddress: true
+      IamInstanceProfile: !Ref InstanceProfileCluster
+      ImageId: ami-0b33d91d
+      InstanceType: t2.micro
+      KeyName: !If [ HasKeyName, !Ref KeyName, !Ref "AWS::NoValue" ]
+      SecurityGroups:
+        - !Ref SecurityGroupCluster
+      UserData:
+        "Fn::Base64":
+          !Sub |
+            #!/bin/bash -x
+            cfn-init --stack ${AWS::StackName} --resource LaunchConfigurationCluster --region ${AWS::Region}
+            cfn-signal -e $? --stack ${AWS::StackName} --resource AutoScalingGroupCluster --region ${AWS::Region}
