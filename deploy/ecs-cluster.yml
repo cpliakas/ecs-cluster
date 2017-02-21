@@ -130,6 +130,22 @@ Resources:
   Cluster:
     Type: AWS::ECS::Cluster
 
+  RoleService:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "ec2.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole
+
   RoleCluster:
     Type: AWS::IAM::Role
     Properties:
@@ -203,3 +219,47 @@ Resources:
         MinInstancesInService: !Ref ClusterDesiredCapacity
         PauseTime: PT5M
         WaitOnResourceSignals: true
+
+  QueueBlox:
+    Type: AWS::SQS::Queue
+
+  RoleTaskBlox:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "ecs-tasks.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Policies:
+        -
+          PolicyName: "TaskAccess"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Action:
+                  - "ecs:DescribeClusters"
+                  - "ecs:DescribeContainerInstances"
+                  - "ecs:DescribeTaskDefinition"
+                  - "ecs:DescribeTasks"
+                  - "ecs:ListClusters"
+                  - "ecs:ListContainerInstances"
+                  - "ecs:ListTasks"
+                  - "ecs:StartTask"
+                  - "ecs:StopTask"
+                Resource: "*"
+              -
+                Effect: "Allow"
+                Action:
+                  - "sqs:DeleteMessage"
+                  - "sqs:GetQueueAttributes"
+                  - "sqs:GetQueueUrl"
+                  - "sqs:ReceiveMessage"
+                Resource: !GetAtt QueueBlox.Arn
