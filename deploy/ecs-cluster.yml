@@ -146,7 +146,7 @@ Resources:
             Effect: "Allow"
             Principal:
               Service:
-                - "ec2.amazonaws.com"
+                - "ecs.amazonaws.com"
             Action:
               - "sts:AssumeRole"
       ManagedPolicyArns:
@@ -386,25 +386,25 @@ Resources:
             SourcePath: "/var/lib/etcd"
           Name: "etcd-state"
 
-  # ServiceBloxScheduler:
-  #   Type: "AWS::ECS::Service"
-  #   Properties:
-  #     Cluster: !Ref Cluster
-  #     DesiredCount: !Ref BloxSchedulerDesiredCount
-  #     DeploymentConfiguration:
-  #       MaximumPercent: 100
-  #       MinimumHealthyPercent: 0
-  #     LoadBalancers:
-  #       -
-  #         TargetGroupArn: !Ref TargetGroupBloxScheduler
-  #         ContainerPort: 2000
-  #         ContainerName: scheduler
-  #     Role: !GetAtt RoleService.Arn
-  #     TaskDefinition: !Ref TaskDefinitionBlox
-  #   DependsOn:
-  #     - LoadBalancer
-  #     - LoadBalancerListener
-  #     - TargetGroupBloxScheduler
+  ServiceBloxScheduler:
+    Type: "AWS::ECS::Service"
+    Properties:
+      Cluster: !Ref Cluster
+      DesiredCount: !Ref BloxSchedulerDesiredCount
+      DeploymentConfiguration:
+        MaximumPercent: 100
+        MinimumHealthyPercent: 0
+      LoadBalancers:
+        -
+          TargetGroupArn: !Ref TargetGroupBloxScheduler
+          ContainerPort: 2000
+          ContainerName: scheduler
+      Role: !GetAtt RoleService.Arn
+      TaskDefinition: !Ref TaskDefinitionBlox
+    DependsOn:
+      - LoadBalancer
+      - LoadBalancerListener
+      - TargetGroupBloxScheduler
 
   LoadBalancer:
     Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
