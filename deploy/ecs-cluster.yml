@@ -17,6 +17,18 @@ Parameters:
   AvailabilityZone3:
     Type: AWS::EC2::AvailabilityZone::Name
 
+  ClusterDesiredCapacity:
+    Description: The number of EC2 instances in the AutoScalingGroupCluster ASG.
+    Type: Number
+    Default: 1
+    MinValue: 1
+
+  ClusterMaxSize:
+    Description: The maximum number of EC2 instances in the AutoScalingGroupCluster ASG.
+    Type: Number
+    Default: 9
+    MinValue: 1
+
   KeyName:
     Description: The name of the key pair used to SSH into the box, pass an empty string for no SSH access.
     Type: String
@@ -156,7 +168,7 @@ Resources:
     Properties:
       AssociatePublicIpAddress: true
       IamInstanceProfile: !Ref InstanceProfileCluster
-      ImageId: ami-0b33d91d
+      ImageId: ami-b2df2ca4
       InstanceType: t2.micro
       KeyName: !If [ HasKeyName, !Ref KeyName, !Ref "AWS::NoValue" ]
       SecurityGroups:
@@ -165,5 +177,29 @@ Resources:
         "Fn::Base64":
           !Sub |
             #!/bin/bash -x
-            cfn-init --stack ${AWS::StackName} --resource LaunchConfigurationCluster --region ${AWS::Region}
-            cfn-signal -e $? --stack ${AWS::StackName} --resource AutoScalingGroupCluster --region ${AWS::Region}
+            yum install -y aws-cfn-bootstrap
+            /opt/aws/bin/cfn-init --stack ${AWS::StackName} --resource LaunchConfigurationCluster --region ${AWS::Region}
+            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource AutoScalingGroupCluster --region ${AWS::Region}
+
+  AutoScalingGroupCluster:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier:
+        - !Ref SubnetClusterZone1
+        - !Ref SubnetClusterZone2
+        - !Ref SubnetClusterZone3
+      DesiredCapacity: !Ref ClusterDesiredCapacity
+      LaunchConfigurationName: !Ref LaunchConfigurationCluster
+      # TargetGroupARNs:
+      #   - !Ref TargetGroupCluster
+      MinSize: !Ref ClusterDesiredCapacity
+      MaxSize: !Ref ClusterMaxSize
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT3M
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MaxBatchSize: 1
+        MinInstancesInService: !Ref ClusterDesiredCapacity
+        PauseTime: PT5M
+        WaitOnResourceSignals: true
