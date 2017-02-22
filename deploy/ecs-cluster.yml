@@ -29,20 +29,18 @@ Parameters:
     Default: 9
     MinValue: 1
 
-  EventHandlerS3Bucket:
+  LambdaArtifactsS3Bucket:
     Type: String
     Description: >
       REQUIRED - Specifies the name of the S3 bucket that contains the lambda
-      event handler function.
+      artifacts.
 
-  EventHandlerS3Key:
+  LambdaArtifactS3Key:
     Type: String
     Default: "lambda/handler.zip"
     Description: >
-      REQUIRED - Specifies the key in EventHandlerS3Bucket to the index.zip file
-      that contains the lambda event handling function. Please download this
-      from https://github.com/awslabs/ecs-cid-sample/tree/master/code and upload
-      it to EventHandlerS3Bucket.
+      REQUIRED - Specifies the key in LambdaArtifactsS3Bucket to the handler.zip
+      file that contains the lambda functions.
 
   KeyName:
     Description: The name of the key pair used to SSH into the box, pass an empty string for no SSH access.
@@ -214,8 +212,10 @@ Resources:
             /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource AutoScalingGroupCluster --region ${AWS::Region}
 
   # The autoscaling group for EC2 instance in the ECS cluster. Events are sent
-  # to the TopicAutoScalingGroupClusterEvents SNS topic to handle container draining
-  # during normal autoscaling events.
+  # to the TopicAutoScalingGroupClusterEvents SNS topic to handle container
+  # draining during normal autoscaling events. The custom "ecs:cluster:name" tag
+  # is set for all instances in the ASG to ease discovery of the cluster that
+  # the instances belong to in the lambda function.
   AutoScalingGroupCluster:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
@@ -348,8 +348,8 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       Code:
-        S3Bucket: !Ref EventHandlerS3Bucket
-        S3Key: !Ref EventHandlerS3Key
+        S3Bucket: !Ref LambdaArtifactsS3Bucket
+        S3Key: !Ref LambdaArtifactS3Key
       Description: The function that listens for autoscaling events and performs container draining operations.
       Handler: handler.event_handler
       Role: !GetAtt LambdaFunctionEventHandlerRole.Arn
