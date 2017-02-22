@@ -40,7 +40,9 @@ Parameters:
     Default: "lambda/handler.zip"
     Description: >
       REQUIRED - Specifies the key in LambdaArtifactsS3Bucket to the handler.zip
-      file that contains the lambda functions.
+      file that contains the lambda functions. It is recommended that you
+      download the handler.zip package from https://github.com/cpliakas/ecs-cluster/tree/master/lambda
+      and upload it to the 'lambda/handler.zip' key in an S3 bucket you own.
 
   KeyName:
     Description: The name of the key pair used to SSH into the box, pass an empty string for no SSH access.
