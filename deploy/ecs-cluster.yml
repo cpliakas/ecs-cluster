@@ -4,7 +4,7 @@ AWSTemplateFormatVersion: "2010-09-09"
 
 
 Description: >
-  An ECS Cluster with Blox.
+  An ECS cluster in a VPC.
 
 Parameters:
 
@@ -17,12 +17,6 @@ Parameters:
   AvailabilityZone3:
     Type: AWS::EC2::AvailabilityZone::Name
 
-  BloxSchedulerDesiredCount:
-    Description: The number of simultaneous blox scheduler tasks to run on the cluster.
-    Type: Number
-    Default: 1
-    MinValue: 1
-
   ClusterDesiredCapacity:
     Description: The number of EC2 instances in the AutoScalingGroupCluster ASG.
     Type: Number
@@ -34,6 +28,21 @@ Parameters:
     Type: Number
     Default: 9
     MinValue: 1
+
+  EventHandlerS3Bucket:
+    Type: String
+    Description: >
+      REQUIRED - Specifies the name of the S3 bucket that contains the lambda
+      event handler function.
+
+  EventHandlerS3Key:
+    Type: String
+    Default: "lambda/handler.zip"
+    Description: >
+      REQUIRED - Specifies the key in EventHandlerS3Bucket to the index.zip file
+      that contains the lambda event handling function. Please download this
+      from https://github.com/awslabs/ecs-cid-sample/tree/master/code and upload
+      it to EventHandlerS3Bucket.
 
   KeyName:
     Description: The name of the key pair used to SSH into the box, pass an empty string for no SSH access.
@@ -129,9 +138,9 @@ Resources:
     Properties:
       GroupId: !Ref SecurityGroupCluster
       SourceSecurityGroupId: !Ref SecurityGroupCluster
-      FromPort: "-1"
-      ToPort: "-1"
-      IpProtocol: "-1"
+      FromPort: -1
+      ToPort: -1
+      IpProtocol: -1
 
   Cluster:
     Type: AWS::ECS::Cluster
@@ -140,15 +149,15 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: "2012-10-17"
+        Version: 2012-10-17
         Statement:
           -
-            Effect: "Allow"
+            Effect: Allow
             Principal:
               Service:
-                - "ecs.amazonaws.com"
+                - ecs.amazonaws.com
             Action:
-              - "sts:AssumeRole"
+              - sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole
 
@@ -156,25 +165,26 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: "2012-10-17"
+        Version: 2012-10-17
         Statement:
           -
-            Effect: "Allow"
+            Effect: Allow
             Principal:
               Service:
-                - "ec2.amazonaws.com"
+                - ec2.amazonaws.com
             Action:
-              - "sts:AssumeRole"
+              - sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
 
   InstanceProfileCluster:
     Type: AWS::IAM::InstanceProfile
     Properties:
-      Path: "/"
+      Path: /
       Roles:
         - !Ref RoleCluster
 
+  # The launch configuration for EC2 instances in the ECS cluster.
   LaunchConfigurationCluster:
     Type: AWS::AutoScaling::LaunchConfiguration
     DependsOn: Cluster
@@ -203,6 +213,9 @@ Resources:
             /opt/aws/bin/cfn-init --stack ${AWS::StackName} --resource LaunchConfigurationCluster --region ${AWS::Region}
             /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource AutoScalingGroupCluster --region ${AWS::Region}
 
+  # The autoscaling group for EC2 instance in the ECS cluster. Events are sent
+  # to the TopicAutoScalingGroupClusterEvents SNS topic to handle container draining
+  # during normal autoscaling events.
   AutoScalingGroupCluster:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
@@ -216,6 +229,18 @@ Resources:
       #   - !Ref TargetGroupCluster
       MinSize: !Ref ClusterDesiredCapacity
       MaxSize: !Ref ClusterMaxSize
+      NotificationConfigurations:
+        - TopicARN: !Ref TopicAutoScalingGroupClusterEvents
+          NotificationTypes:
+            - autoscaling:EC2_INSTANCE_LAUNCH
+            - autoscaling:EC2_INSTANCE_LAUNCH_ERROR
+            - autoscaling:EC2_INSTANCE_TERMINATE
+            - autoscaling:EC2_INSTANCE_TERMINATE_ERROR
+      Tags:
+        -
+          Key: ecs:cluster:name
+          Value: !Ref Cluster
+          PropagateAtLaunch: true
     CreationPolicy:
       ResourceSignal:
         Timeout: PT3M
@@ -226,221 +251,117 @@ Resources:
         PauseTime: PT5M
         WaitOnResourceSignals: true
 
-  QueueBlox:
-    Type: AWS::SQS::Queue
-
-  ClusterEventsToQueue:
-    Type: AWS::Events::Rule
-    Properties:
-      Description: "CloudWatch ECS events"
-      EventPattern:
-        source:
-          - "aws.ecs"
-        detail-type:
-          - "ECS Task State Change"
-          - "ECS Container Instance State Change"
-      Targets:
-        -
-          Arn: !GetAtt QueueBlox.Arn
-          Id: "SQSTarget"
-
-  QueuePolicyBlox:
-    Type: "AWS::SQS::QueuePolicy"
-    Properties:
-      Queues:
-        - !Ref QueueBlox
-      PolicyDocument:
-        Version: "2012-10-17"
-        Id: !Join [ "", [ !GetAtt QueueBlox.Arn, "/SQSDefaultPolicy" ] ]
-        Statement:
-          -
-            Effect: "Allow"
-            Principal:
-              AWS: "*"
-            Action:
-              - "sqs:SendMessage"
-            Resource:
-              - !GetAtt QueueBlox.Arn
-            Condition:
-              ArnEquals:
-                aws:SourceArn: !GetAtt ClusterEventsToQueue.Arn
-
-  RoleTaskBlox:
+  # Role for LifecycleHookInstanceTerminating.
+  RoleLifecycleHookInstanceTerminating:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
           -
-            Effect: "Allow"
+            Effect: Allow
             Principal:
               Service:
-                - "ecs-tasks.amazonaws.com"
+                - autoscaling.amazonaws.com
             Action:
-              - "sts:AssumeRole"
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AutoScalingNotificationAccessRole
+      Path: /
+
+  # The autoscaling lifecycle hook that sends AutoScalingGroupCluster's
+  # termination events to TopicAutoScalingGroupClusterEvents.
+  LifecycleHookInstanceTerminating:
+    Type: AWS::AutoScaling::LifecycleHook
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroupCluster
+      DefaultResult: ABANDON
+      HeartbeatTimeout: 60
+      LifecycleTransition: autoscaling:EC2_INSTANCE_TERMINATING
+      NotificationTargetARN: !Ref TopicAutoScalingGroupClusterEvents
+      RoleARN: !GetAtt RoleLifecycleHookInstanceTerminating.Arn
+
+  # The SNS topic that AutoScalingGroupCluster's events are sent to. This topic
+  # triggers the LambdaFunctionEventHandler lambda function, which performs the
+  # container draining operations.
+  TopicAutoScalingGroupClusterEvents:
+    Type: "AWS::SNS::Topic"
+    Properties:
+      Subscription:
+        -
+          Endpoint: !GetAtt LambdaFunctionEventHandler.Arn
+          Protocol: lambda
+
+  # The role that LambdaFunctionEventHandler assumes at runtime which grants
+  # access to the resource that are required to perform the container draining
+  # operations.
+  # TODO: Lock down the IAM permissions. They are way too open.
+  LambdaFunctionEventHandlerRole:
+    Type: AWS::IAM::Role
+    Properties:
       Policies:
         -
-          PolicyName: "TaskAccess"
+          PolicyName: ContainerDrainingAccess
           PolicyDocument:
-            Version: "2012-10-17"
+            Version: 2012-10-17
             Statement:
               -
-                Effect: "Allow"
+                Effect: Allow
                 Action:
-                  - "ecs:DescribeClusters"
-                  - "ecs:DescribeContainerInstances"
-                  - "ecs:DescribeTaskDefinition"
-                  - "ecs:DescribeTasks"
-                  - "ecs:ListClusters"
-                  - "ecs:ListContainerInstances"
-                  - "ecs:ListTasks"
-                  - "ecs:StartTask"
-                  - "ecs:StopTask"
+                  - autoscaling:CompleteLifecycleAction
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - ec2:DescribeInstances
+                  - ec2:DescribeInstanceAttribute
+                  - ec2:DescribeInstanceStatus
+                  - ec2:DescribeHosts
+                  - ec2:DescribeInstances
+                  - ec2:DescribeTags
+                  - ecs:ListContainerInstances
+                  - ecs:SubmitContainerStateChange
+                  - ecs:SubmitTaskStateChange
+                  - ecs:DescribeContainerInstances
+                  - ecs:UpdateContainerInstancesState
+                  - ecs:ListTasks
+                  - ecs:DescribeTasks
+                  - sns:Publish
+                  - sns:ListSubscriptions
                 Resource: "*"
-              -
-                Effect: "Allow"
-                Action:
-                  - "sqs:DeleteMessage"
-                  - "sqs:GetQueueAttributes"
-                  - "sqs:GetQueueUrl"
-                  - "sqs:ReceiveMessage"
-                Resource: !GetAtt QueueBlox.Arn
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AutoScalingNotificationAccessRole
+      Path: /
 
-  TaskDefinitionBlox:
-    Type: AWS::ECS::TaskDefinition
+  # The lambda function that is triggered on AutoScalingGroupCluster's events.
+  # This function performs the container draining operations.
+  LambdaFunctionEventHandler:
+    Type: AWS::Lambda::Function
     Properties:
-      Family: BloxFramework
-      TaskRoleArn: !GetAtt RoleTaskBlox.Arn
-      ContainerDefinitions:
-        -
-          Name: "scheduler"
-          Hostname: "scheduler"
-          Image: "bloxoss/daemon-scheduler:0.2.0"
-          Memory: "128"
-          PortMappings:
-            -
-              ContainerPort: "2000"
-          Environment:
-            -
-              Name: "AWS_REGION"
-              Value: !Ref "AWS::Region"
-          Command:
-            - "--bind"
-            - "0.0.0.0:2000"
-            - "--css-endpoint"
-            - "css:3000"
-            - "--etcd-endpoint"
-            - "etcd:2379"
-          Links:
-            - "css"
-            - "etcd"
-          Essential: "false"
-        -
-          Name: "css"
-          Hostname: "css"
-          Image: "bloxoss/cluster-state-service:0.2.0"
-          Memory: "128"
-          Environment:
-            -
-              Name: "AWS_REGION"
-              Value: !Ref "AWS::Region"
-          Command:
-            - "--bind"
-            - "0.0.0.0:3000"
-            - "--etcd-endpoint"
-            - "etcd:2379"
-            - "--queue"
-            - !Ref QueueBlox
-          Links:
-            - "etcd"
-          Essential: "false"
-        -
-          Name: "etcd"
-          Hostname: "etcd"
-          Image: "quay.io/coreos/etcd:v3.0.15"
-          Memory: "256"
-          Environment:
-            -
-              Name: "ETCDCTL_API"
-              Value: "3"
-          Command:
-            - "/usr/local/bin/etcd"
-            - "--data-dir"
-            - "/var/lib/etcd/data"
-            - "--wal-dir"
-            - "/var/lib/etcd/wal"
-            - "--listen-client-urls"
-            - "http://0.0.0.0:2379"
-            - "--advertise-client-urls"
-            - "http://0.0.0.0:2379"
-            - "--listen-peer-urls"
-            - "http://0.0.0.0:2380"
-          MountPoints:
-            -
-              SourceVolume: "etcd-state"
-              ContainerPath: "/var/lib/etcd"
-          Essential: "true"
-      Volumes:
-        -
-          Host:
-            SourcePath: "/var/lib/etcd"
-          Name: "etcd-state"
+      Code:
+        S3Bucket: !Ref EventHandlerS3Bucket
+        S3Key: !Ref EventHandlerS3Key
+      Description: The function that listens for autoscaling events and performs container draining operations.
+      Handler: index.event_handler
+      Role: !GetAtt LambdaFunctionEventHandlerRole.Arn
+      Runtime: python2.7
+      Timeout: 30
 
-  ServiceBloxScheduler:
-    Type: "AWS::ECS::Service"
+  # Grant TopicAutoScalingGroupClusterEvents permission to invoke
+  # LambdaFunctionEventHandler.
+  PermissionInvokeLambdaFunctionEventHandler:
+    Type: AWS::Lambda::Permission
     Properties:
-      Cluster: !Ref Cluster
-      DesiredCount: !Ref BloxSchedulerDesiredCount
-      DeploymentConfiguration:
-        MaximumPercent: 100
-        MinimumHealthyPercent: 0
-      LoadBalancers:
-        -
-          TargetGroupArn: !Ref TargetGroupBloxScheduler
-          ContainerPort: 2000
-          ContainerName: scheduler
-      Role: !GetAtt RoleService.Arn
-      TaskDefinition: !Ref TaskDefinitionBlox
-    DependsOn:
-      - LoadBalancer
-      - LoadBalancerListener
-      - TargetGroupBloxScheduler
-
-  LoadBalancer:
-    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
-    Properties:
-      Scheme: internal
-      SecurityGroups:
-        - !Ref SecurityGroupCluster
-      Subnets:
-        - !Ref SubnetClusterZone1
-        - !Ref SubnetClusterZone2
-        - !Ref SubnetClusterZone3
-
-  LoadBalancerListener:
-    Type: "AWS::ElasticLoadBalancingV2::Listener"
-    Properties:
-      DefaultActions:
-        -
-          Type: forward
-          TargetGroupArn: !Ref TargetGroupBloxScheduler
-      LoadBalancerArn: !Ref LoadBalancer
-      Port: 80
-      Protocol: HTTP
-
-  TargetGroupBloxScheduler:
-    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
-    Properties:
-      HealthCheckIntervalSeconds: 60
-      HealthCheckPath: /v1/ping
-      HealthCheckProtocol: HTTP
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 2
-      Port: 80
-      Protocol: HTTP
-      TargetGroupAttributes:
-        -
-          Key: deregistration_delay.timeout_seconds
-          Value: 30
-      UnhealthyThresholdCount: 2
-      VpcId: !Ref VPC
+      FunctionName: !Ref LambdaFunctionEventHandler
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref TopicAutoScalingGroupClusterEvents
