@@ -2,6 +2,8 @@ import boto3
 import json
 import logging
 
+# Inspired by https://github.com/awslabs/ecs-cid-sample/tree/master/code
+
 # Set up a basic logger.
 logging.basicConfig()
 logger = logging.getLogger()
@@ -28,9 +30,9 @@ def event_handler(event, context):
     line = event['Records'][0]['Sns']['Message']
     message = json.loads(line)
 
-    # TODO Abort on anything other than "autoscaling:EC2_INSTANCE_TERMINATING"
+    # Abort on anything other than "autoscaling:EC2_INSTANCE_TERMINATING"
     if 'LifecycleTransition' not in message:
-        logger.info('LifecycleTransition does not exist, abort')
+        logger.info('Only autoscaling:EC2_INSTANCE_TERMINATING supported, abort')
     elif message['LifecycleTransition'] != 'autoscaling:EC2_INSTANCE_TERMINATING':
         logger.info('Only autoscaling:EC2_INSTANCE_TERMINATING supported, abort')
     else:
@@ -39,13 +41,16 @@ def event_handler(event, context):
         cluster_name = cluster_name_from_instance_id(message['EC2InstanceId'])
         instance = container_instance_info(cluster_name, message['EC2InstanceId'])
 
-        # If instance is ACTIVE, set to DRAINING, otherwise check if there are tasks
-        # that are still running. If not, send the TERMINATE signal.
+        # Set to DRAINING if instance is ACTIVE, otherwise check if there are
+        # tasks that are still running. If there are no tasks left, complete
+        # the lifecycle action.
         if instance['status'] == 'ACTIVE':
             action = 'drain'
             subject="Draining tasks from instance " + message['EC2InstanceId']
             logger.info(subject)
 
+            # Set instance state to DRAINING, re-publish a message to trigger
+            # this function and check whether any tasks are running.
             ecs.update_container_instances_state(cluster=cluster_name,containerInstances=[instance['containerInstanceArn']],status='DRAINING')
             sns.publish(
                 TopicArn=event['Records'][0]['Sns']['TopicArn'],
@@ -59,7 +64,7 @@ def event_handler(event, context):
                 subject="Waiting for " + instance['runningTasksCount'] + " tasks to drain from instance " + message['EC2InstanceId']
                 logger.info(subject)
 
-                # Resend the message to re-check whether tasks have drained.
+                # Re-publish this message to check whether tasks have drained.
                 sns.publish(
                     TopicArn=event['Records'][0]['Sns']['TopicArn'],
                     Message=json.dumps(message),
@@ -70,6 +75,7 @@ def event_handler(event, context):
                 action = 'continue'
                 logger.info("Tasks drained from instance %s", message['EC2InstanceId'])
 
+                # Complete the lifecycle action for this instance.
                 asg.complete_lifecycle_action(
                     LifecycleHookName=message['LifecycleHookName'],
                     AutoScalingGroupName=message['AutoScalingGroupName'],
