@@ -219,8 +219,6 @@ Resources:
         - !Ref SubnetClusterZone3
       DesiredCapacity: !Ref ClusterDesiredCapacity
       LaunchConfigurationName: !Ref LaunchConfigurationCluster
-      TargetGroupARNs:
-        - !Ref LoadBalancerTargetGroup
       MinSize: !Ref ClusterDesiredCapacity
       MaxSize: !Ref ClusterMaxSize
       NotificationConfigurations:
@@ -467,7 +465,6 @@ Resources:
               -
                 Effect: Allow
                 Action:
-                  - ec2.DescribeInstances
                   - ecs:DescribeClusters
                   - ecs:DescribeContainerInstances
                   - ecs:DescribeTaskDefinition
@@ -570,6 +567,10 @@ Resources:
 
   ServiceBloxScheduler:
     Type: AWS::ECS::Service
+    DependsOn:
+      - LoadBalancer
+      - LoadBalancerListener
+      - LoadBalancerTargetGroup
     Properties:
       Cluster: !Ref Cluster
       DesiredCount: 1
