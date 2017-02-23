@@ -2,6 +2,7 @@
 
 var http = require('http');
 
+// Borrowed from https://github.com/awslabs/ecs-cid-sample/blob/master/cform/ecs.yaml
 exports.handler = function(event, context) {
 
   // Setup request options and parameters
