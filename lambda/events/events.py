@@ -14,7 +14,7 @@ session = boto3.session.Session()
 
 # Instantiate the service clients
 ec2 = session.client(service_name='ec2')
-ecs = ecsClient = session.client(service_name='ecs')
+ecs = session.client(service_name='ecs')
 asg = session.client('autoscaling')
 sns = session.client('sns')
 
@@ -117,7 +117,7 @@ def cluster_name_from_instance_id(instance_id):
 """
 def container_instance_info(cluster_name, instance_id):
     instance_list = ecs.list_container_instances(cluster=cluster_name)
-    instances = ecsClient.describe_container_instances(cluster=cluster_name, containerInstances=instance_list['containerInstanceArns'])
+    instances = ecs.describe_container_instances(cluster=cluster_name, containerInstances=instance_list['containerInstanceArns'])
 
     for instance in instances['containerInstances']:
         if instance['ec2InstanceId'] == instance_id:
