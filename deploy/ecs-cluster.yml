@@ -467,6 +467,7 @@ Resources:
               -
                 Effect: Allow
                 Action:
+                  - ec2.DescribeInstances
                   - ecs:DescribeClusters
                   - ecs:DescribeContainerInstances
                   - ecs:DescribeTaskDefinition
@@ -669,6 +670,7 @@ Resources:
 
   ApiGatewayDeploymentBlox:
     Type: AWS::ApiGateway::Deployment
+    DependsOn: ApiGatewayMethodBlox
     Properties:
       Description: Deploy API
       RestApiId: !Ref RestApiBlox
