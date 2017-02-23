@@ -583,12 +583,6 @@ Resources:
       Role: !GetAtt RoleService.Arn
       TaskDefinition: !Ref TaskDefinitionBlox
 
-  RestApi:
-    Type: AWS::ApiGateway::RestApi
-    Properties:
-      Name: !Join [ " ", [ !Ref "AWS::StackName", "scheduler proxy" ] ]
-      Description: API Gateway REST API
-
   RoleLambdaFunctionProxy:
     Type: AWS::IAM::Role
     Properties:
@@ -645,10 +639,47 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName: !GetAtt LambdaFunctionProxy.Arn
       Principal: apigateway.amazonaws.com
-      SourceArn: !Join [ "", [ "arn:aws:execute-api:", !Ref "AWS::Region", ":", !Ref "AWS::AccountId", ":", !Ref RestApi, "/*/*/*" ] ]
+      SourceArn: !Join [ "", [ "arn:aws:execute-api:", !Ref "AWS::Region", ":", !Ref "AWS::AccountId", ":", !Ref RestApiBlox, "/*/*/*" ] ]
+
+  RestApiBlox:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Join [ " ", [ !Ref "AWS::StackName", "scheduler proxy" ] ]
+      Description: API Gateway REST API
+
+  ApiGatewayResourceBlox:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt RestApiBlox.RootResourceId
+      PathPart: "{proxy+}"
+      RestApiId: !Ref RestApiBlox
+
+  ApiGatewayMethodBlox:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      ResourceId: !Ref ApiGatewayResourceBlox
+      RestApiId: !Ref RestApiBlox
+      HttpMethod: ANY
+      AuthorizationType: AWS_IAM
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        PassthroughBehavior: WHEN_NO_MATCH
+        Uri: !Join [ "", [ "arn:aws:apigateway:", !Ref "AWS::Region", ":lambda:path/2015-03-31/functions/", !GetAtt LambdaFunctionProxy.Arn, "/invocations" ] ]
+
+  ApiGatewayDeploymentBlox:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      Description: Deploy API
+      RestApiId: !Ref RestApiBlox
+      StageName: blox
 
 Outputs:
 
   Cluster:
     Description: The logical ID of the ECS cluster
     Value: !Ref Cluster
+
+  SchedulerUrl:
+    Description: The URL to the scheduler API
+    Value: !Join [ "", [ "https://", !Ref RestApiBlox, ".execute-api.", !Ref "AWS::Region", ".amazonaws.com/", "blox" ] ]
