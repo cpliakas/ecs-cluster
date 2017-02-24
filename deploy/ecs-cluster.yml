@@ -200,6 +200,20 @@ Resources:
   RoleCluster:
     Type: AWS::IAM::Role
     Properties:
+      Policies:
+        -
+          PolicyName: CloudWatchLogsAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                Resource: "arn:aws:logs:*:*:*"
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
@@ -245,7 +259,7 @@ Resources:
         "Fn::Base64":
           !Sub |
             #!/bin/bash -x
-            yum install -y aws-cfn-bootstrap
+            yum install -y aws-cfn-bootstrap awslogs
             /opt/aws/bin/cfn-init --stack ${AWS::StackName} --resource LaunchConfigurationCluster --region ${AWS::Region}
             /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource AutoScalingGroupCluster --region ${AWS::Region}
 
