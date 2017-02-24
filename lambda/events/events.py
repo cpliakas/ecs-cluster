@@ -1,6 +1,7 @@
 import boto3
 import json
 import logging
+import time
 
 # Inspired by https://github.com/awslabs/ecs-cid-sample/tree/master/code
 
@@ -65,6 +66,7 @@ def handler(event, context):
                 logger.info(subject)
 
                 # Re-publish this message to check whether tasks have drained.
+                time.sleep(5)
                 sns.publish(
                     TopicArn=event['Records'][0]['Sns']['TopicArn'],
                     Message=json.dumps(message),

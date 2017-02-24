@@ -234,19 +234,33 @@ Resources:
       Roles:
         - !Ref RoleCluster
 
-  # The launch configuration for EC2 instances in the ECS cluster.
+  # The launch configuration for EC2 instances in the ECS cluster. The awslogs
+  # service is installed and started in order to send container logs to
+  # CloudWatch.
   LaunchConfigurationCluster:
     Type: AWS::AutoScaling::LaunchConfiguration
     DependsOn: Cluster
     Metadata:
       AWS::CloudFormation::Init:
         config:
+          packages:
+            yum:
+              awslogs: []
           files:
+            /etc/awslogs/awslogs.conf:
+              content: |
+                [general]
+                state_file = /var/lib/awslogs/agent-state 
             /etc/ecs/ecs.config:
               content: |
                 ECS_CLUSTER={{cluster_name}}
               context:
                 cluster_name: !Ref Cluster
+          services:
+            sysvinit:
+              awslogs:
+                enabled: true
+                ensureRunning: true
     Properties:
       AssociatePublicIpAddress: true
       IamInstanceProfile: !Ref InstanceProfileCluster
@@ -259,7 +273,7 @@ Resources:
         "Fn::Base64":
           !Sub |
             #!/bin/bash -x
-            yum install -y aws-cfn-bootstrap awslogs
+            yum install -y aws-cfn-bootstrap
             /opt/aws/bin/cfn-init --stack ${AWS::StackName} --resource LaunchConfigurationCluster --region ${AWS::Region}
             /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource AutoScalingGroupCluster --region ${AWS::Region}
 
